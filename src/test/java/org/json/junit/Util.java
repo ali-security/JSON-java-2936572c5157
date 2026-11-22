@@ -117,4 +117,50 @@ public class Util {
             );
         }
     }
+
+    /**
+     * Runs the task on a separate thread with a generous (8 MB) stack and
+     * returns whatever it threw, or null when it completed normally. The
+     * nesting depth tests use this so that the parser's maximum nesting depth,
+     * rather than the stack size the test JVM happens to run with, decides
+     * the outcome of parsing a deeply nested document.
+     * @param task the work to run
+     * @return the Throwable thrown by the task, or null
+     */
+    public static Throwable runWithLargeStack(final Runnable task) {
+        final Throwable[] thrown = new Throwable[1];
+        Thread thread = new Thread(null, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    task.run();
+                } catch (Throwable t) {
+                    thrown[0] = t;
+                }
+            }
+        }, "large-stack-parser", 8L * 1024 * 1024);
+        thread.start();
+        try {
+            thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            fail("Interrupted while waiting for the parser thread");
+        }
+        return thrown[0];
+    }
+
+    /**
+     * Asserts that the task, run with a large stack, failed with a
+     * JSONException reporting that the given maximum nesting depth was
+     * reached (and not with a StackOverflowError or any other error).
+     * @param maxNestingDepth the nesting depth expected in the message
+     * @param task the parsing work to run
+     */
+    public static void assertMaxNestingDepthReached(int maxNestingDepth, Runnable task) {
+        Throwable thrown = runWithLargeStack(task);
+        assertNotNull("Expecting a JSONException", thrown);
+        assertTrue("Wrong throwable thrown: " + thrown, thrown instanceof JSONException);
+        assertTrue("Wrong throwable thrown: not expecting message <" + thrown.getMessage() + ">",
+                thrown.getMessage().startsWith("Maximum nesting depth of " + maxNestingDepth));
+    }
 }
